@@ -337,7 +337,9 @@
                     
                     if(Math.abs(v.currentTime - PlayerEngine.lastTime) < 0.1) {
                         PlayerEngine.stallCount++;
-                        if(PlayerEngine.stallCount > 3) { 
+                        // Dá mais tempo para Filmes/Séries carregarem o buffer sem reiniciar o vídeo
+                        var maxStalls = (App.mode === 'live') ? 3 : 15;
+                        if(PlayerEngine.stallCount > maxStalls) { 
                             PlayerEngine.stallCount = 0; 
                             PlayerEngine.recover(); 
                         }
@@ -378,7 +380,7 @@
             page: 0, itemsPerPage: 50, 
             
             sessionStartTime: null,
-            refreshInterval: 12 * 60 * 60 * 1000, 
+            refreshInterval: 24 * 60 * 60 * 1000, 
             refreshTimer: null,
 
             init: function() {
@@ -671,7 +673,21 @@
                 }
             },
             
-            togglePlay: function() { var v = document.getElementById('player'); if(v.paused) { safePlay(v); } else { v.pause(); } },
+            togglePlay: function() { 
+                var v = document.getElementById('player'); 
+                var osd = document.getElementById('osd');
+                if(v.paused) { 
+                    safePlay(v); 
+                    osd.innerText = "▶ PLAY";
+                    osd.style.display = 'block';
+                    setTimeout(function(){ if(!v.paused) osd.style.display = 'none'; }, 1500);
+                } else { 
+                    v.pause(); 
+                    osd.innerText = "⏸ PAUSADO";
+                    osd.style.display = 'block';
+                } 
+            },
+
             seek: function(secs) { var v = document.getElementById('player'); v.currentTime += secs; },
 
             toggleFull: function() {
