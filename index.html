@@ -261,7 +261,7 @@
             init: function() { 
                 this.video = document.getElementById('player'); 
                 this.video.onended = function() { 
-                    if (App.mode === 'live') { PlayerEngine.recover(); } 
+                    if (App.mode === 'live') { PlayerEngine.hardReset(); } 
                     else if (App.mode === 'series' && App.isFolder && App.idx < App.seriesEps.length-1) { 
                         App.idx++; App.updateFocus(); App.playStream(App.seriesEps[App.idx]); 
                     } else { App.exitFull(); } 
@@ -275,12 +275,12 @@
                 
                 if (url.indexOf('.ts') > -1) {
                     this.startMonitor(); 
-                    this.video.onerror = function() { PlayerEngine.recover(); };
+                    this.video.onerror = function() { PlayerEngine.hardReset(); };
                     this.video.src = url; 
                     safePlay(this.video);
                 } else if (url.indexOf('.m3u8') > -1) {
                     this.startMonitor();
-                    this.video.onerror = function() { PlayerEngine.recover(); }; 
+                    this.video.onerror = function() { PlayerEngine.hardReset(); }; 
                     var canPlayNative = this.video.canPlayType('application/vnd.apple.mpegurl');
                     if (canPlayNative === "probably" || canPlayNative === "maybe") { 
                         this.video.src = url; 
@@ -292,41 +292,32 @@
                         this.video.src = url; safePlay(this.video); 
                     }
                 } else {
-                    this.video.onerror = function() { PlayerEngine.recover(); };
+                    this.video.onerror = function() { PlayerEngine.hardReset(); };
                     this.video.src = url; safePlay(this.video);
                 }
             },
             startHls: function(url) {
                 if(this.hls) { this.hls.destroy(); }
+                // BUFFER EXTREMAMENTE REDUZIDO PARA NÃO TRAVAR O NAVEGADOR DA TV
                 var config = { 
                     enableWorker: false, 
                     capLevelToPlayerSize: true, 
-                    maxBufferLength: 15, 
-                    maxMaxBufferLength: 20, 
-                    maxBufferSize: 15 * 1000 * 1000, 
-                    backBufferLength: 5, 
+                    maxBufferLength: 6, // Máximo de 6 segundos em memória
+                    maxMaxBufferLength: 10, 
+                    maxBufferSize: 3 * 1000 * 1000, // Limite brutal de 3MB
+                    backBufferLength: 0, // Desliga memória de vídeo que já passou
                     liveSyncDurationCount: 3, 
-                    liveMaxLatencyDurationCount: 10,
-                    manifestLoadingTimeOut: 15000, 
-                    manifestLoadingMaxRetry: 5, 
-                    levelLoadingMaxRetry: 5, 
-                    fragLoadingMaxRetry: 5,
-                    fragLoadingRetryDelay: 1000 
+                    manifestLoadingTimeOut: 10000, 
+                    manifestLoadingMaxRetry: 3, 
+                    levelLoadingMaxRetry: 3, 
+                    fragLoadingMaxRetry: 3
                 };
                 this.hls = new Hls(config); this.hls.loadSource(url); this.hls.attachMedia(this.video);
                 this.hls.on(Hls.Events.MANIFEST_PARSED, function() { safePlay(PlayerEngine.video); });
                 
                 this.hls.on(Hls.Events.ERROR, function(event, data) {
                     if (data.fatal) { 
-                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) { 
-                            PlayerEngine.hls.startLoad(); 
-                        }
-                        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { 
-                            PlayerEngine.hls.recoverMediaError(); 
-                        }
-                        else { 
-                            PlayerEngine.recover(); 
-                        }
+                        PlayerEngine.hardReset(); // Em vez de tentar consertar o erro, apaga e reconecta
                     }
                 });
             },
@@ -337,11 +328,10 @@
                     
                     if(Math.abs(v.currentTime - PlayerEngine.lastTime) < 0.1) {
                         PlayerEngine.stallCount++;
-                        // Dá mais tempo para Filmes/Séries carregarem o buffer sem reiniciar o vídeo
-                        var maxStalls = (App.mode === 'live') ? 3 : 15;
+                        var maxStalls = (App.mode === 'live') ? 3 : 8;
                         if(PlayerEngine.stallCount > maxStalls) { 
                             PlayerEngine.stallCount = 0; 
-                            PlayerEngine.recover(); 
+                            PlayerEngine.hardReset(); // Força a recriação do player se a tela congelar
                         }
                     } else { 
                         PlayerEngine.stallCount = 0; 
@@ -351,26 +341,27 @@
             },
             stopMonitor: function() { if(this.monitorTimer) clearInterval(this.monitorTimer); },
             
-            recover: function() {
+            // FUNÇÃO REFEITA: REBOOT INVISÍVEL
+            hardReset: function() {
                 if(!this.url) return;
-                clearTimeout(this.recoveryTimer);
+                var currentUrl = this.url;
+                var currentMode = App.mode === 'live';
                 
-                if(this.hls) {
-                    try { 
-                        this.hls.recoverMediaError(); 
-                        setTimeout(function() { PlayerEngine.hls.startLoad(); }, 500); 
-                    } catch(e){}
-                } else {
-                    this.video.load(); safePlay(this.video);
-                }
+                this.hardStop(); // Destrói completamente o rastro de memória antigo
+                
+                // Recria a conexão 1 segundo depois para dar tempo da TV "respirar"
+                setTimeout(function() {
+                    PlayerEngine.play(currentUrl, currentMode);
+                }, 1000);
             },
             
             hardStop: function() { 
                 this.stopMonitor(); clearTimeout(this.recoveryTimer); 
                 var osdEl = document.getElementById('osd'); if(osdEl) osdEl.style.display = 'none'; 
-                this.url = null; this.video.onerror = null; 
+                this.video.onerror = null; 
                 if(this.hls) { try { this.hls.stopLoad(); this.hls.detachMedia(); this.hls.destroy(); } catch(e) {} this.hls = null; } 
                 if(this.video) { this.video.pause(); this.video.removeAttribute('src'); this.video.load(); } 
+                this.url = null;
             }
         };
 
